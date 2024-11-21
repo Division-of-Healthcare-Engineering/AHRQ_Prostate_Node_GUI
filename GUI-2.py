@@ -84,14 +84,14 @@ class MyApp:
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
-        image_file_path = "D:/Anirudh/AHRQ/107_Image.nii.gz"
-        truth_file_path = "D:/Anirudh/AHRQ/107_Truth.nii.gz"
+        image_file_path = "Image.nii.gz"
+        truth_file_path = "Truth.nii.gz"
         mask_paths = {
-            "UNC": "D:/Anirudh/AHRQ/masks/masks/0/Mask.nii.gz",
-            "Physician A": "D:/Anirudh/AHRQ/masks/masks/1/Mask.nii.gz",
-            "B": "D:/Anirudh/AHRQ/masks/masks/2/Mask.nii.gz",
-            "C": "D:/Anirudh/AHRQ/masks/masks/3/Mask.nii.gz",
-            "D": "D:/Anirudh/AHRQ/masks/masks/4/Mask.nii.gz",
+            "UNC": "0/Mask.nii.gz",
+            "Physician A": "1/Mask.nii.gz",
+            "B": "2/Mask.nii.gz",
+            "C": "3/Mask.nii.gz",
+            "D": "4/Mask.nii.gz",
         }
 
         try:
@@ -120,8 +120,6 @@ class MyApp:
             num_slices = self.image_array.shape[0]
             self.slice_scrollbar.config(from_=0, to=num_slices - 1)
             self.current_slice = 0
-
-            # Display initial slice
             self.display_slice(self.current_slice)
 
         except Exception as e:
@@ -154,7 +152,6 @@ class MyApp:
                 mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
                 img_rgb[mask_slice == 255] = mask_color
 
-            
             truth_outline = binary_dilation(truth_slice > 0) & ~(truth_slice > 0)
             img_rgb[truth_outline] = [255, 0, 0] 
 
