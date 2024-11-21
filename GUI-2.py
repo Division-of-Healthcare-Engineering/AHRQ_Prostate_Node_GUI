@@ -4,13 +4,32 @@ from tkinter import *
 import SimpleITK as sitk
 from PIL import Image, ImageTk
 import numpy as np
-import matplotlib
+from scipy.ndimage import binary_dilation
+
+def resample_to_match(image, target_shape):
+        original_spacing = np.array(image.GetSpacing())  
+        original_size = np.array(image.GetSize())        
+
+        target_size = target_shape[::-1]  
+        new_spacing = original_spacing * (original_size / target_size)
+
+        resampler = sitk.ResampleImageFilter()
+        resampler.SetOutputSpacing(new_spacing.tolist())
+        resampler.SetSize([int(sz) for sz in target_size])
+        resampler.SetOutputDirection(image.GetDirection())
+        resampler.SetOutputOrigin(image.GetOrigin())
+        resampler.SetInterpolator(sitk.sitkNearestNeighbor)  
+        return resampler.Execute(image)
 
 class MyApp:
     def __init__(self, parent):
         self.bg1 = '#717171'
         self.parent = parent
         self.parent.minsize(600, 450)
+        self.is_loading_image = False
+
+        # Bind the window resize event
+        self.resize_event = self.parent.bind("<Configure>", self.on_resize)
 
         # Main container
         self.main_container = Frame(parent, background=self.bg1)
@@ -22,105 +41,143 @@ class MyApp:
         self.top_frame = Frame(self.main_container, background=self.bg1)
         self.top_frame.grid(row=0, column=0, sticky="nsew")
 
-        # Right panel for checkboxes
-        self.right_panel = Frame(self.main_container, background=self.bg1)
-        self.right_panel.grid(row=0, column=1, sticky="nsw")
-
-        # Mid frame for controls (scrollbars)
+        # Mid frame for controls
         self.mid_frame = Frame(self.main_container, background=self.bg1)
         self.mid_frame.grid(row=1, column=0, sticky="nsew")
+
+        # Right frame for checkboxes
+        self.right_frame = Frame(self.main_container, background=self.bg1)
+        self.right_frame.grid(row=0, column=1, sticky="nsw")
 
         # Configure grid for canvas and scrollbars
         self.main_container.grid_rowconfigure(2, weight=1)
         self.main_container.grid_columnconfigure(0, weight=1)
         self.top_frame.grid_columnconfigure(0, weight=1)
 
-        # Canvas for image
         self.canvas = Canvas(self.top_frame)
         self.canvas.grid(row=0, column=0, sticky="nsew")
 
-        self.mask_labels = ['UNC', 'Physician A', 'B', 'C', 'D']
-        self.check_vars = {}  
-
-        for label in self.mask_labels:
-            var = IntVar()
-            checkbox = Checkbutton(self.right_panel, text=label, variable=var, background=self.bg1, command=self.update_masks)
-            checkbox.pack(anchor="w", pady=2)
-            self.check_vars[label] = var  
-
         self.slice_scrollbar = Scale(self.top_frame, from_=0, to=0, orient="vertical", command=self.on_slice_scroll)
-        self.slice_scrollbar.grid(row=0, column=2, sticky="ns")
+        self.slice_scrollbar.grid(row=0, column=1, sticky="ns")
 
-        self.confidence_scrollbar = Scale(self.mid_frame, from_=0, to=255, orient="horizontal", label="Confidence Level Threshold", command=self.on_confidence_scroll)
-        self.confidence_scrollbar.grid(row=2, column=0, sticky="ew")
+        self.confidence_scrollbar = Scale(self.mid_frame, from_=0, to=255, orient="horizontal", label="Confidence Level", command=self.on_confidence_scroll)
+        self.confidence_scrollbar.grid(row=0, column=0, sticky="ew")
         self.mid_frame.grid_columnconfigure(0, weight=1)
 
-        self.masks = {}  
-        self.shown_prediction = None  
-        self.current_slice = 0  
-        self.load_sample_masks()
+        self.load_button = Button(self.mid_frame, text="Show Wash", command=self.load_image, background=self.bg1, relief="groove")
+        self.load_button.grid(row=1, column=0, sticky="ew", ipadx=20)
 
-    def load_sample_masks(self):
-        """Load binary masks from specified file paths."""
-        base_path = "path to masks"
-        mask_filenames = [f"{base_path}{i}/Mask.nii.gz" for i in range(5)]
-        
-        for label, file_path in zip(self.mask_labels, mask_filenames):
-            try:
-                mask = sitk.ReadImage(file_path)
-                mask_array = sitk.GetArrayFromImage(mask)
-                
-                self.masks[label] = mask_array.astype(np.uint8)
-                print(f"Loaded mask for {label} from {file_path}")
-                self.slice_scrollbar.config(to=mask_array.shape[0] - 1)
+        self.image_array = None
+        self.truth_array = None
+        self.mask_arrays = {}  
+        self.checked_masks = []  
+        self.current_slice = 0
 
-            except Exception as e:
-                print(f"Error loading mask for {label} from {file_path}: {e}")
-                self.masks[label] = np.zeros((1, 320, 320), dtype=np.uint8)
+        self.masks = ['UNC', 'Physician A', 'B', 'C', 'D']
+        self.checkbox_vars = {}
+        for idx, mask in enumerate(self.masks):
+            var = IntVar(value=0)
+            self.checkbox_vars[mask] = var
+            cb = Checkbutton(self.right_frame, text=mask, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
+            cb.grid(row=idx, column=0, sticky="w")
 
-    def update_masks(self):
-        selected_masks = [self.masks[label][self.current_slice] for label, var in self.check_vars.items() if var.get() == 1]
-        num_checked = len(selected_masks)
-        
-        if num_checked > 0:
-            scaled_masks = [mask * (255 / num_checked) for mask in selected_masks]
-            combined_mask = np.sum(scaled_masks, axis=0)
-            self.shown_prediction = np.clip(combined_mask, 0, 255).astype(np.uint8)
-        else:
-            self.shown_prediction = np.zeros((320, 320), dtype=np.uint8)
-        
-        self.update_display()
-    def update_display(self):
+
+    def load_image(self):
+        """ Load a NIfTI image, ground truth mask, and five additional masks. """
+        image_file_path = "D:/Anirudh/AHRQ/107_Image.nii.gz"
+        truth_file_path = "D:/Anirudh/AHRQ/107_Truth.nii.gz"
+        mask_paths = {
+            "UNC": "D:/Anirudh/AHRQ/masks/masks/0/Mask.nii.gz",
+            "Physician A": "D:/Anirudh/AHRQ/masks/masks/1/Mask.nii.gz",
+            "B": "D:/Anirudh/AHRQ/masks/masks/2/Mask.nii.gz",
+            "C": "D:/Anirudh/AHRQ/masks/masks/3/Mask.nii.gz",
+            "D": "D:/Anirudh/AHRQ/masks/masks/4/Mask.nii.gz",
+        }
+
         try:
-            if self.shown_prediction is None:
-                return  
+            img = sitk.ReadImage(image_file_path)
+            self.image_array = sitk.GetArrayFromImage(img)
+            #print(f"Image shape: {self.image_array.shape}")
 
-            display_array = self.shown_prediction.astype(np.uint8)
-            display_array_rgb = np.stack((display_array,) * 3, axis=-1)  
-            display_width, display_height = 750, 600  
+            truth = sitk.ReadImage(truth_file_path)
+            self.truth_array = sitk.GetArrayFromImage(truth)
+            #print(f"Ground truth shape: {self.truth_array.shape}")
 
-            pil_image = Image.fromarray(display_array_rgb).resize((display_width, display_height), Image.Resampling.LANCZOS)
-            tk_image = ImageTk.PhotoImage(image=pil_image)
+            self.mask_arrays = {}
+            for key, path in mask_paths.items():
+                mask = sitk.ReadImage(path)
+                if mask.GetSize() != img.GetSize():  
+                    #print(f"Resampling mask '{key}' from shape {mask.GetSize()} to {img.GetSize()}")
+                    mask = resample_to_match(mask, self.image_array.shape)
+                self.mask_arrays[key] = sitk.GetArrayFromImage(mask)
+                #print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
-            self.canvas.delete("all")
-            self.canvas.config(width=display_width, height=display_height)
-            self.canvas.create_image(0, 0, anchor="nw", image=tk_image)
-            self.canvas.image = tk_image
-           
+            
+            shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape, self.truth_array.shape]
+            if not all(shape == shapes[0] for shape in shapes):
+                raise ValueError("Shape mismatch between image and masks after resampling.")
+
+            num_slices = self.image_array.shape[0]
+            self.slice_scrollbar.config(from_=0, to=num_slices - 1)
+            self.current_slice = 0
+
+            # Display initial slice
+            self.display_slice(self.current_slice)
+
         except Exception as e:
-            print(f"Error updating display: {e}")
+            print(f"Error loading the data: {e}")
+
+
+    def on_checkbox_toggle(self):
+        self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
+        self.confidence_scrollbar.config(to=255 * len(self.checked_masks) if self.checked_masks else 255)
+        self.display_slice(self.current_slice) 
+
 
     def on_slice_scroll(self, value):
-        """Handle slice scrolling to update the displayed slice."""
-        self.current_slice = int(value)
-        self.update_masks()  
+        if self.image_array is not None:
+            self.current_slice = int(value)
+            self.display_slice(self.current_slice)
 
     def on_confidence_scroll(self, value):
-        self.confidence_level_threshold = int(value)
-        self.update_display()
+        self.display_slice(self.current_slice)
+
+    def display_slice(self, slice_index):
+        try:
+            img_slice = self.image_array[slice_index, :, :]
+            truth_slice = self.truth_array[slice_index, :, :]
+            img_slice = (img_slice - np.min(img_slice)) / (np.max(img_slice) - np.min(img_slice)) * 255
+            img_rgb = np.stack((img_slice, img_slice, img_slice), axis=-1).astype(np.uint8)
+
+            mask_color = [0, 255, 0]  
+            for mask_name in self.checked_masks:
+                mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
+                img_rgb[mask_slice == 255] = mask_color
+
+            
+            truth_outline = binary_dilation(truth_slice > 0) & ~(truth_slice > 0)
+            img_rgb[truth_outline] = [255, 0, 0] 
+
+            window_width = min(self.parent.winfo_width() - 50, 512)  
+            window_height = min(self.parent.winfo_height() - 100, 512)  
+            pil_image = Image.fromarray(img_rgb).resize((window_width, window_height), Image.Resampling.LANCZOS)
+            tk_image = ImageTk.PhotoImage(image=pil_image)
+
+            self.canvas.config(width=window_width, height=window_height)
+            self.canvas.delete("all")
+            self.canvas.create_image(0, 0, anchor="nw", image=tk_image)
+            self.canvas.image = tk_image
+
+        except Exception as e:
+            print(f"Error displaying slice {slice_index}: {e}")
+
+    def on_resize(self, event):
+        if not self.is_loading_image and self.image_array is not None:
+            self.display_slice(self.current_slice)
+
 
 root = Tk()
 root.configure(bg="#717171")
-root.title("Show Multiple Mask Overlays")
+root.title("Confidence-Based Color Wash with Multiple Masks")
 myapp = MyApp(root)
 root.mainloop()
