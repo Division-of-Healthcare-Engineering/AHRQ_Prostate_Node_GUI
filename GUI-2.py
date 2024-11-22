@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import tkinter as tk
+import os
 from tkinter import *
 import SimpleITK as sitk
 from PIL import Image, ImageTk
@@ -26,6 +26,7 @@ def resample_to_match(image, target_shape):
 class MyApp:
     def __init__(self, parent):
         self.bg1 = '#717171'
+        self.base_path = r'\\vscifs1\PhysicsQAdata\BMA\pred_files'
         self.parent = parent
         self.parent.minsize(600, 450)
         self.is_loading_image = False
@@ -67,52 +68,53 @@ class MyApp:
         self.confidence_scrollbar.grid(row=0, column=0, sticky="ew")
         self.mid_frame.grid_columnconfigure(0, weight=1)
 
-        self.load_button = Button(self.mid_frame, text="Show Wash", command=self.load_image, background=self.bg1,
-                                  relief="groove")
-        self.load_button.grid(row=1, column=0, sticky="ew", ipadx=20)
-
+        # self.load_button = Button(self.mid_frame, text="Show Wash", command=self.load_image, background=self.bg1,
+        #                           relief="groove")
+        # self.load_button.grid(row=1, column=0, sticky="ew", ipadx=20)
         self.image_array = None
         self.truth_array = None
         self.mask_arrays = {}
         self.checked_masks = []
         self.current_slice = 0
 
-        self.masks = ['UNC', 'Physician A', 'B', 'C', 'D']
+        self.masks = ['UNC', 'Physician A']
         self.checkbox_vars = {}
         for idx, mask in enumerate(self.masks):
             var = IntVar(value=0)
             self.checkbox_vars[mask] = var
             cb = Checkbutton(self.right_frame, text=mask, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
             cb.grid(row=idx, column=0, sticky="w")
+        self.load_image()
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
-        image_file_path = "Image.nii.gz"
+        image_file = "Image.nii"
         truth_file_path = "Truth.nii.gz"
         mask_paths = {
-            "UNC": "0/Mask.nii.gz",
-            "Physician A": "1/Mask.nii.gz",
-            "B": "2/Mask.nii.gz",
-            "C": "3/Mask.nii.gz",
-            "D": "4/Mask.nii.gz",
+            "UNC": os.path.join(self.base_path, "Pred.nii"),
+            "Physician A": os.path.join(self.base_path, "Pred1.nii"),
         }
 
         try:
-            img = sitk.ReadImage(image_file_path)
+            img = sitk.ReadImage(os.path.join(self.base_path, image_file))
             self.image_array = sitk.GetArrayFromImage(img)
             # print(f"Image shape: {self.image_array.shape}")
 
-            truth = sitk.ReadImage(truth_file_path)
+            truth = sitk.ReadImage(os.path.join(self.base_path, truth_file_path))
             self.truth_array = sitk.GetArrayFromImage(truth)
             # print(f"Ground truth shape: {self.truth_array.shape}")
 
             self.mask_arrays = {}
+            x = 0.5
             for key, path in mask_paths.items():
                 mask = sitk.ReadImage(path)
                 if mask.GetSize() != img.GetSize():
                     # print(f"Resampling mask '{key}' from shape {mask.GetSize()} to {img.GetSize()}")
                     mask = resample_to_match(mask, self.image_array.shape)
-                self.mask_arrays[key] = sitk.GetArrayFromImage(mask)
+                mask_array = sitk.GetArrayFromImage(mask)
+                mask_array = (mask_array > x).astype('int')
+                x += 0.4
+                self.mask_arrays[key] = mask_array
                 # print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
             shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape, self.truth_array.shape]
@@ -143,17 +145,41 @@ class MyApp:
     def display_slice(self, slice_index):
         try:
             img_slice = self.image_array[slice_index, :, :]
+            min_val, max_val = np.min(img_slice),  np.max(img_slice)
+            dif = max_val - min_val if max_val != min_val else 1
             truth_slice = self.truth_array[slice_index, :, :]
-            img_slice = (img_slice - np.min(img_slice)) / (np.max(img_slice) - np.min(img_slice)) * 255
+            img_slice = (img_slice - min_val)/dif * 255
             img_rgb = np.stack((img_slice, img_slice, img_slice), axis=-1).astype(np.uint8)
 
-            mask_color = [0, 255, 0]
+            green = [0, 255, 0]
+            red = [255, 0, 0]
+            blue = [0, 0, 255]
+            total_mask = np.zeros(img_slice.shape)
             for mask_name in self.checked_masks:
                 mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
-                img_rgb[mask_slice == 255] = mask_color
+                total_mask += mask_slice
+            pred_slice = (total_mask == len(self.checked_masks)).astype('int') if self.checked_masks else total_mask
 
-            truth_outline = binary_dilation(truth_slice > 0) & ~(truth_slice > 0)
-            img_rgb[truth_outline] = [255, 0, 0]
+            """
+            Make a green outline where we have a prediction, but not the ground truth
+            """
+            green_outline = (pred_slice > 0) & ~(truth_slice > 0)
+            green_outline = binary_dilation(green_outline) & ~green_outline
+            """
+            Make a blue outline where prediction AND ground truth agree
+            """
+            blue_outline = (pred_slice > 0) & (truth_slice == pred_slice) & (truth_slice > 0)
+            blue_outline = binary_dilation(blue_outline) & ~blue_outline
+            """
+            Make a red outline where the ground truth exists but no prediction
+            """
+            red_outline = (truth_slice > 0) & ~(pred_slice > 0) if np.any(pred_slice) else truth_slice > 0
+            red_outline = binary_dilation(red_outline) & ~red_outline
+
+            img_rgb[green_outline] = green
+            img_rgb[red_outline] = red
+            # img_rgb[blue_outline] = blue
+
 
             window_width = min(self.parent.winfo_width() - 50, 512)
             window_height = min(self.parent.winfo_height() - 100, 512)
