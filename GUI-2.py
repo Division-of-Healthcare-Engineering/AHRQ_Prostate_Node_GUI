@@ -1,29 +1,34 @@
 #!/usr/bin/python
-import tkinter as tk
+import os
 from tkinter import *
 import SimpleITK as sitk
 from PIL import Image, ImageTk
 import numpy as np
 from scipy.ndimage import binary_dilation
 
+
 def resample_to_match(image, target_shape):
-        original_spacing = np.array(image.GetSpacing())  
-        original_size = np.array(image.GetSize())        
+    original_spacing = np.array(image.GetSpacing())
+    original_size = np.array(image.GetSize())
 
-        target_size = target_shape[::-1]  
-        new_spacing = original_spacing * (original_size / target_size)
+    target_size = target_shape[::-1]
+    new_spacing = original_spacing * (original_size / target_size)
 
-        resampler = sitk.ResampleImageFilter()
-        resampler.SetOutputSpacing(new_spacing.tolist())
-        resampler.SetSize([int(sz) for sz in target_size])
-        resampler.SetOutputDirection(image.GetDirection())
-        resampler.SetOutputOrigin(image.GetOrigin())
-        resampler.SetInterpolator(sitk.sitkNearestNeighbor)  
-        return resampler.Execute(image)
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetOutputSpacing(new_spacing.tolist())
+    resampler.SetSize([int(sz) for sz in target_size])
+    resampler.SetOutputDirection(image.GetDirection())
+    resampler.SetOutputOrigin(image.GetOrigin())
+    resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+    return resampler.Execute(image)
+
 
 class MyApp:
-    def __init__(self, parent):
+    def __init__(self, parent, base_path):
         self.bg1 = '#717171'
+        self.base_path = base_path
+        self.image_array = None
+        self.truth_array = None
         self.parent = parent
         self.parent.minsize(600, 450)
         self.is_loading_image = False
@@ -60,59 +65,69 @@ class MyApp:
         self.slice_scrollbar = Scale(self.top_frame, from_=0, to=0, orient="vertical", command=self.on_slice_scroll)
         self.slice_scrollbar.grid(row=0, column=1, sticky="ns")
 
-        self.confidence_scrollbar = Scale(self.mid_frame, from_=0, to=255, orient="horizontal", label="Confidence Level", command=self.on_confidence_scroll)
-        self.confidence_scrollbar.grid(row=0, column=0, sticky="ew")
         self.mid_frame.grid_columnconfigure(0, weight=1)
 
-        self.load_button = Button(self.mid_frame, text="Show Wash", command=self.load_image, background=self.bg1, relief="groove")
-        self.load_button.grid(row=1, column=0, sticky="ew", ipadx=20)
-
-        self.image_array = None
-        self.truth_array = None
-        self.mask_arrays = {}  
-        self.checked_masks = []  
+        # self.load_button = Button(self.mid_frame, text="Show Wash", command=self.load_image, background=self.bg1,
+        #                           relief="groove")
+        # self.load_button.grid(row=1, column=0, sticky="ew", ipadx=20)
+        self.mask_arrays = {}
+        self.checked_masks = []
+        self.checked_truth = []
         self.current_slice = 0
 
-        self.masks = ['UNC', 'Physician A', 'B', 'C', 'D']
+        self.masks = [i for i in os.listdir(base_path) if i.endswith('.nii') and
+                      i.find('Image') == -1]
+        self.mask_names = []
+        self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.mhd')]
+        self.truth_names = []
         self.checkbox_vars = {}
-        for idx, mask in enumerate(self.masks):
+        self.checkbox_truth = {}
+        base_inx = 0
+        for idx, file_name in enumerate(self.masks):
+            if 'CTV_Pelvis' in file_name and file_name.find('.nii') != -1:
+                key = file_name.split('CTV_Pelvis_')[1]
+            else:
+                key = file_name
+            key = key.split('.')[0]
             var = IntVar(value=0)
-            self.checkbox_vars[mask] = var
-            cb = Checkbutton(self.right_frame, text=mask, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
+            self.checkbox_vars[key] = var
+            cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
+            self.mask_names.append(key)
             cb.grid(row=idx, column=0, sticky="w")
-
+            base_inx = idx
+        base_inx += 1
+        for idx, file_name in enumerate(self.truth_files):
+            key = file_name.split('.')[0]
+            var = IntVar(value=0)
+            self.checkbox_truth[key] = var
+            self.truth_names.append(key)
+            cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
+            cb.grid(row=idx + base_inx, column=0, sticky="w")
+        self.load_image()
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
-        image_file_path = "Image.nii.gz"
-        truth_file_path = "Truth.nii.gz"
-        mask_paths = {
-            "UNC": "0/Mask.nii.gz",
-            "Physician A": "1/Mask.nii.gz",
-            "B": "2/Mask.nii.gz",
-            "C": "3/Mask.nii.gz",
-            "D": "4/Mask.nii.gz",
-        }
-
+        image_file = "Image.nii"
         try:
-            img = sitk.ReadImage(image_file_path)
+            img = sitk.ReadImage(os.path.join(self.base_path, image_file))
             self.image_array = sitk.GetArrayFromImage(img)
-            #print(f"Image shape: {self.image_array.shape}")
-
-            truth = sitk.ReadImage(truth_file_path)
-            self.truth_array = sitk.GetArrayFromImage(truth)
-            #print(f"Ground truth shape: {self.truth_array.shape}")
+            self.truth_array = np.zeros(self.image_array.shape)
+            # print(f"Image shape: {self.image_array.shape}")
+            if self.truth_files and False:
+                truth = sitk.ReadImage(os.path.join(self.base_path, self.truth_files[0]))
+                self.truth_array = sitk.GetArrayFromImage(truth)
+            # print(f"Ground truth shape: {self.truth_array.shape}")
 
             self.mask_arrays = {}
-            for key, path in mask_paths.items():
-                mask = sitk.ReadImage(path)
-                if mask.GetSize() != img.GetSize():  
-                    #print(f"Resampling mask '{key}' from shape {mask.GetSize()} to {img.GetSize()}")
+            for key, file_name in zip(self.mask_names + self.truth_names, self.masks + self.truth_files):
+                mask = sitk.ReadImage(os.path.join(self.base_path, file_name))
+                if mask.GetSize() != img.GetSize():
+                    # print(f"Resampling mask '{key}' from shape {mask.GetSize()} to {img.GetSize()}")
                     mask = resample_to_match(mask, self.image_array.shape)
-                self.mask_arrays[key] = sitk.GetArrayFromImage(mask)
-                #print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
+                mask_array = sitk.GetArrayFromImage(mask)
+                self.mask_arrays[key] = mask_array
+                # print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
-            
             shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape, self.truth_array.shape]
             if not all(shape == shapes[0] for shape in shapes):
                 raise ValueError("Shape mismatch between image and masks after resampling.")
@@ -125,12 +140,10 @@ class MyApp:
         except Exception as e:
             print(f"Error loading the data: {e}")
 
-
     def on_checkbox_toggle(self):
         self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
-        self.confidence_scrollbar.config(to=255 * len(self.checked_masks) if self.checked_masks else 255)
-        self.display_slice(self.current_slice) 
-
+        self.checked_truth = [key for key, var in self.checkbox_truth.items() if var.get() == 1]
+        self.display_slice(self.current_slice)
 
     def on_slice_scroll(self, value):
         if self.image_array is not None:
@@ -142,21 +155,51 @@ class MyApp:
 
     def display_slice(self, slice_index):
         try:
+            min_val, max_val = -200,  300
+            dif = max_val - min_val if max_val != min_val else 1
             img_slice = self.image_array[slice_index, :, :]
-            truth_slice = self.truth_array[slice_index, :, :]
-            img_slice = (img_slice - np.min(img_slice)) / (np.max(img_slice) - np.min(img_slice)) * 255
+
+            img_slice = (img_slice - min_val)/dif * 255
+            img_slice = np.clip(img_slice, 0, 255)
             img_rgb = np.stack((img_slice, img_slice, img_slice), axis=-1).astype(np.uint8)
 
-            mask_color = [0, 255, 0]  
+            green = [0, 255, 0]
+            red = [255, 0, 0]
+            blue = [0, 0, 255]
+            total_mask = np.zeros(img_slice.shape)
             for mask_name in self.checked_masks:
                 mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
-                img_rgb[mask_slice == 255] = mask_color
+                total_mask += mask_slice
+            pred_slice = (total_mask == len(self.checked_masks)).astype('int') if self.checked_masks else total_mask
 
-            truth_outline = binary_dilation(truth_slice > 0) & ~(truth_slice > 0)
-            img_rgb[truth_outline] = [255, 0, 0] 
+            total_truth = np.zeros(img_slice.shape)
+            for truth_name in self.checked_truth:
+                mask_slice = self.mask_arrays[truth_name][slice_index, :, :]
+                total_truth += mask_slice
+            truth_slice = (total_truth > 0).astype('int')
+            """
+            Make a green outline where we have a prediction, but not the ground truth
+            """
+            green_outline = (pred_slice > 0) & ~(truth_slice > 0)
+            green_outline = binary_dilation(green_outline) & ~green_outline
+            """
+            Make a blue outline where prediction AND ground truth agree
+            """
+            blue_outline = (pred_slice > 0) & (truth_slice == pred_slice) & (truth_slice > 0)
+            blue_outline = binary_dilation(blue_outline) & ~blue_outline
+            """
+            Make a red outline where the ground truth exists but no prediction
+            """
+            red_outline = (truth_slice > 0) & ~(pred_slice > 0) if np.any(pred_slice) else truth_slice > 0
+            red_outline = binary_dilation(red_outline) & ~red_outline
 
-            window_width = min(self.parent.winfo_width() - 50, 512)  
-            window_height = min(self.parent.winfo_height() - 100, 512)  
+            img_rgb[green_outline] = green
+            img_rgb[red_outline] = red
+            # img_rgb[blue_outline] = blue
+
+
+            window_width = min(self.parent.winfo_width() - 50, 512)
+            window_height = min(self.parent.winfo_height() - 100, 512)
             pil_image = Image.fromarray(img_rgb).resize((window_width, window_height), Image.Resampling.LANCZOS)
             tk_image = ImageTk.PhotoImage(image=pil_image)
 
@@ -173,8 +216,14 @@ class MyApp:
             self.display_slice(self.current_slice)
 
 
-root = Tk()
-root.configure(bg="#717171")
-root.title("Confidence-Based Color Wash with Multiple Masks")
-myapp = MyApp(root)
-root.mainloop()
+def run_model(path):
+    root = Tk()
+    root.configure(bg="#717171")
+    root.title("Confidence-Based Color Wash with Multiple Masks")
+    myapp = MyApp(root, path)
+    root.mainloop()
+
+
+if __name__ == '__main__':
+    path = r'\\vscifs1\PhysicsQAdata\BMA\Predictions\ProstateNodes\Output\1.3.46.670589.33.1.63862355173814227200001.5286669292534571828'
+    run_model(path)
