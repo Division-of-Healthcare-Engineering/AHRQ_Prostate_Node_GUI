@@ -1,4 +1,5 @@
 #!/usr/bin/python
+import os
 import tkinter as tk
 from tkinter import *
 import SimpleITK as sitk
@@ -39,7 +40,7 @@ class MyApp:
         self.canvas = Canvas(self.top_frame)
         self.canvas.grid(row=0, column=0, sticky="nsew")
 
-        self.mask_labels = ['UNC', 'Physician A', 'B', 'C', 'D']
+        self.mask_labels = ['UNC', 'Physician A', 'B'] #, 'C', 'D'
         self.check_vars = {}  
 
         for label in self.mask_labels:
@@ -62,8 +63,9 @@ class MyApp:
 
     def load_sample_masks(self):
         """Load binary masks from specified file paths."""
-        base_path = "path to masks"
-        mask_filenames = [f"{base_path}{i}/Mask.nii.gz" for i in range(5)]
+        base_path = r"\\vscifs1\PhysicsQAdata\BMA\pred_files"
+        # mask_filenames = [f"{base_path}{i}/Mask.nii.gz" for i in range(5)]
+        mask_filenames = [os.path.join(base_path, i) for i in os.listdir(base_path) if i.find('.nii') != -1]
         
         for label, file_path in zip(self.mask_labels, mask_filenames):
             try:
@@ -76,7 +78,7 @@ class MyApp:
 
             except Exception as e:
                 print(f"Error loading mask for {label} from {file_path}: {e}")
-                self.masks[label] = np.zeros((1, 320, 320), dtype=np.uint8)
+                self.masks[label] = np.zeros((1, 512, 512), dtype=np.uint8)
 
     def update_masks(self):
         selected_masks = [self.masks[label][self.current_slice] for label, var in self.check_vars.items() if var.get() == 1]
@@ -87,7 +89,7 @@ class MyApp:
             combined_mask = np.sum(scaled_masks, axis=0)
             self.shown_prediction = np.clip(combined_mask, 0, 255).astype(np.uint8)
         else:
-            self.shown_prediction = np.zeros((320, 320), dtype=np.uint8)
+            self.shown_prediction = np.zeros((512, 512), dtype=np.uint8)
         
         self.update_display()
     def update_display(self):
@@ -97,7 +99,7 @@ class MyApp:
 
             display_array = self.shown_prediction.astype(np.uint8)
             display_array_rgb = np.stack((display_array,) * 3, axis=-1)  
-            display_width, display_height = 750, 600  
+            display_width, display_height = 512, 512
 
             pil_image = Image.fromarray(display_array_rgb).resize((display_width, display_height), Image.Resampling.LANCZOS)
             tk_image = ImageTk.PhotoImage(image=pil_image)
