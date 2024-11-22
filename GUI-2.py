@@ -105,15 +105,12 @@ class MyApp:
             # print(f"Ground truth shape: {self.truth_array.shape}")
 
             self.mask_arrays = {}
-            x = 0.5
             for key, path in mask_paths.items():
                 mask = sitk.ReadImage(path)
                 if mask.GetSize() != img.GetSize():
                     # print(f"Resampling mask '{key}' from shape {mask.GetSize()} to {img.GetSize()}")
                     mask = resample_to_match(mask, self.image_array.shape)
                 mask_array = sitk.GetArrayFromImage(mask)
-                mask_array = (mask_array > x).astype('int')
-                x += 0.4
                 self.mask_arrays[key] = mask_array
                 # print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
