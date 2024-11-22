@@ -218,11 +218,10 @@ class MyApp:
             img_rgb[red_outline] = red
             # img_rgb[blue_outline] = blue
 
-
             window_width = min(self.parent.winfo_width() - 50, 512)
             window_height = min(self.parent.winfo_height() - 100, 512)
-            window_width = 512
-            window_height = 512
+            window_width = img_rgb.shape[0]
+            window_height = img_rgb.shape[1]
             pil_image = Image.fromarray(img_rgb)#.resize((window_width, window_height), Image.Resampling.LANCZOS)
             tk_image = ImageTk.PhotoImage(image=pil_image)
 
