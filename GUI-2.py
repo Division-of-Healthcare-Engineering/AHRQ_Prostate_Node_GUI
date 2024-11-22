@@ -221,7 +221,9 @@ class MyApp:
 
             window_width = min(self.parent.winfo_width() - 50, 512)
             window_height = min(self.parent.winfo_height() - 100, 512)
-            pil_image = Image.fromarray(img_rgb).resize((window_width, window_height), Image.Resampling.LANCZOS)
+            window_width = 512
+            window_height = 512
+            pil_image = Image.fromarray(img_rgb)#.resize((window_width, window_height), Image.Resampling.LANCZOS)
             tk_image = ImageTk.PhotoImage(image=pil_image)
 
             self.canvas.config(width=window_width, height=window_height)
