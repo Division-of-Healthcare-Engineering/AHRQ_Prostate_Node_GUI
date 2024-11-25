@@ -33,6 +33,7 @@ class MyApp:
         self.base_path = base_path
         self.image_array = None
         self.truth_array = None
+        self.mask_array = None
         self.parent = parent
         self.parent.minsize(600, 450)
         self.is_loading_image = False
@@ -71,9 +72,6 @@ class MyApp:
 
         self.mid_frame.grid_columnconfigure(0, weight=1)
 
-        # self.load_button = Button(self.mid_frame, text="Show Wash", command=self.load_image, background=self.bg1,
-        #                           relief="groove")
-        # self.load_button.grid(row=1, column=0, sticky="ew", ipadx=20)
         self.mask_arrays = {}
         self.checked_masks = []
         self.checked_truth = []
@@ -95,7 +93,7 @@ class MyApp:
         self.checkbox_vars = {}
         self.checkbox_truth = {}
         base_inx = 0
-        for idx, file_name in enumerate(self.masks):
+        for file_name in self.masks:
             key = file_name
             if 'CTV_Pelvis' in file_name:
                 key = file_name.split('CTV_Pelvis_')[1]
@@ -104,17 +102,26 @@ class MyApp:
             self.checkbox_vars[key] = var
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
             self.mask_names.append(key)
-            cb.grid(row=idx, column=0, sticky="w")
-            base_inx = idx
-        base_inx += 1
-        for idx, file_name in enumerate(self.truth_files):
+            cb.grid(row=base_inx, column=0, sticky="w")
+            base_inx += 1
+
+        for file_name in self.truth_files:
             key = file_name.split('.')[0]
             var = IntVar(value=0)
             self.checkbox_truth[key] = var
             self.truth_names.append(key)
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
-            cb.grid(row=idx + base_inx, column=0, sticky="w")
+            cb.grid(row=base_inx, column=0, sticky="w")
+            base_inx += 1
+
+        self.load_button = Button(self.right_frame, text="Write Prediction", command=self.write_prediction, background=self.bg1,
+                                  relief="groove")
+        self.load_button.grid(row=base_inx, column=0, sticky="ew", ipadx=20)
         self.load_image()
+
+    def write_prediction(self):
+        if np.max(self.mask_array) > 0:
+            np.save(os.path.join(self.base_path, "Write_AI_Predictions.npy"), self.mask_array)
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
@@ -126,17 +133,15 @@ class MyApp:
                 self.image_array = sitk.GetArrayFromImage(img)
             else:
                 self.image_array = np.load(image_path)
+            min_val, max_val = -200,  300
+            dif = max_val - min_val if max_val != min_val else 1
+            self.image_array = (self.image_array - min_val)/dif * 255
+            self.image_array = np.clip(self.image_array, 0, 255)
             self.truth_array = np.zeros(self.image_array.shape)
             # print(f"Image shape: {self.image_array.shape}")
-            if self.truth_files:
-                if use_sitk:
-                    truth = sitk.ReadImage(os.path.join(self.base_path, self.truth_files[0]))
-                    self.truth_array = sitk.GetArrayFromImage(truth)
-                else:
-                    self.truth_array = np.load(os.path.join(self.base_path, self.truth_files[0]))
             # print(f"Ground truth shape: {self.truth_array.shape}")
-
             self.mask_arrays = {}
+            self.mask_array = np.zeros(self.image_array.shape)
             for key, file_name in zip(self.mask_names + self.truth_names, self.masks + self.truth_files):
                 if use_sitk:
                     mask = sitk.ReadImage(os.path.join(self.base_path, file_name))
@@ -164,6 +169,14 @@ class MyApp:
     def on_checkbox_toggle(self):
         self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
         self.checked_truth = [key for key, var in self.checkbox_truth.items() if var.get() == 1]
+        self.mask_array = np.zeros(self.image_array.shape)
+        for mask_name in self.checked_masks:
+            mask_slice = self.mask_arrays[mask_name]
+            self.mask_array += mask_slice
+        self.truth_array = np.zeros(self.image_array.shape)
+        for truth_name in self.checked_truth:
+            mask_slice = self.mask_arrays[truth_name]
+            self.truth_array += mask_slice
         self.display_slice(self.current_slice)
 
     def on_slice_scroll(self, value):
@@ -176,27 +189,15 @@ class MyApp:
 
     def display_slice(self, slice_index):
         try:
-            min_val, max_val = -200,  300
-            dif = max_val - min_val if max_val != min_val else 1
             img_slice = self.image_array[slice_index, :, :]
-
-            img_slice = (img_slice - min_val)/dif * 255
-            img_slice = np.clip(img_slice, 0, 255)
             img_rgb = np.stack((img_slice, img_slice, img_slice), axis=-1).astype(np.uint8)
-
             green = [0, 255, 0]
             red = [255, 0, 0]
             blue = [0, 0, 255]
-            total_mask = np.zeros(img_slice.shape)
-            for mask_name in self.checked_masks:
-                mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
-                total_mask += mask_slice
+            total_mask = self.mask_array[slice_index, ...]
             pred_slice = (total_mask == len(self.checked_masks)).astype('int') if self.checked_masks else total_mask
 
-            total_truth = np.zeros(img_slice.shape)
-            for truth_name in self.checked_truth:
-                mask_slice = self.mask_arrays[truth_name][slice_index, :, :]
-                total_truth += mask_slice
+            total_truth = self.truth_array[slice_index]
             truth_slice = (total_truth > 0).astype('int')
             """
             Make a green outline where we have a prediction, but not the ground truth
