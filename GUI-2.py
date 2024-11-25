@@ -1,7 +1,11 @@
 #!/usr/bin/python
 import os
 from tkinter import *
-import SimpleITK as sitk
+use_sitk = True
+try:
+    import SimpleITK as sitk
+except:
+    use_sitk = False
 from PIL import Image, ImageTk
 import numpy as np
 from scipy.ndimage import binary_dilation
@@ -75,19 +79,26 @@ class MyApp:
         self.checked_truth = []
         self.current_slice = 0
 
-        self.masks = [i for i in os.listdir(base_path) if i.endswith('.nii') and
-                      i.find('Image') == -1]
+        if use_sitk:
+            self.masks = [i for i in os.listdir(base_path) if i.endswith('.nii') and
+                          i.find('Image') == -1]
+        else:
+            self.masks = [i for i in os.listdir(base_path) if i.endswith('.npy') and
+                          i.find('Image') == -1 and i.find('Pred') != -1]
         self.mask_names = []
-        self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.mhd')]
+        if use_sitk:
+            self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.mhd')]
+        else:
+            self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.npy') and
+                                i.find('Image') == -1 and i not in self.masks]
         self.truth_names = []
         self.checkbox_vars = {}
         self.checkbox_truth = {}
         base_inx = 0
         for idx, file_name in enumerate(self.masks):
-            if 'CTV_Pelvis' in file_name and file_name.find('.nii') != -1:
+            key = file_name
+            if 'CTV_Pelvis' in file_name:
                 key = file_name.split('CTV_Pelvis_')[1]
-            else:
-                key = file_name
             key = key.split('.')[0]
             var = IntVar(value=0)
             self.checkbox_vars[key] = var
@@ -107,24 +118,34 @@ class MyApp:
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
-        image_file = "Image.nii"
+        image_file = "Image.nii" if use_sitk else 'Image.npy'
+        image_path = os.path.join(self.base_path, image_file)
         try:
-            img = sitk.ReadImage(os.path.join(self.base_path, image_file))
-            self.image_array = sitk.GetArrayFromImage(img)
+            if use_sitk:
+                img = sitk.ReadImage(image_path)
+                self.image_array = sitk.GetArrayFromImage(img)
+            else:
+                self.image_array = np.load(image_path)
             self.truth_array = np.zeros(self.image_array.shape)
             # print(f"Image shape: {self.image_array.shape}")
-            if self.truth_files and False:
-                truth = sitk.ReadImage(os.path.join(self.base_path, self.truth_files[0]))
-                self.truth_array = sitk.GetArrayFromImage(truth)
+            if self.truth_files:
+                if use_sitk:
+                    truth = sitk.ReadImage(os.path.join(self.base_path, self.truth_files[0]))
+                    self.truth_array = sitk.GetArrayFromImage(truth)
+                else:
+                    self.truth_array = np.load(os.path.join(self.base_path, self.truth_files[0]))
             # print(f"Ground truth shape: {self.truth_array.shape}")
 
             self.mask_arrays = {}
             for key, file_name in zip(self.mask_names + self.truth_names, self.masks + self.truth_files):
-                mask = sitk.ReadImage(os.path.join(self.base_path, file_name))
-                if mask.GetSize() != img.GetSize():
-                    # print(f"Resampling mask '{key}' from shape {mask.GetSize()} to {img.GetSize()}")
-                    mask = resample_to_match(mask, self.image_array.shape)
-                mask_array = sitk.GetArrayFromImage(mask)
+                if use_sitk:
+                    mask = sitk.ReadImage(os.path.join(self.base_path, file_name))
+                    if mask.GetSize() != img.GetSize():
+                        # print(f"Resampling mask '{key}' from shape {mask.GetSize()} to {img.GetSize()}")
+                        mask = resample_to_match(mask, self.image_array.shape)
+                    mask_array = sitk.GetArrayFromImage(mask)
+                else:
+                    mask_array = np.load(os.path.join(self.base_path, file_name))
                 self.mask_arrays[key] = mask_array
                 # print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
@@ -197,10 +218,11 @@ class MyApp:
             img_rgb[red_outline] = red
             # img_rgb[blue_outline] = blue
 
-
             window_width = min(self.parent.winfo_width() - 50, 512)
             window_height = min(self.parent.winfo_height() - 100, 512)
-            pil_image = Image.fromarray(img_rgb).resize((window_width, window_height), Image.Resampling.LANCZOS)
+            window_width = img_rgb.shape[0]
+            window_height = img_rgb.shape[1]
+            pil_image = Image.fromarray(img_rgb)#.resize((window_width, window_height), Image.Resampling.LANCZOS)
             tk_image = ImageTk.PhotoImage(image=pil_image)
 
             self.canvas.config(width=window_width, height=window_height)
