@@ -82,13 +82,13 @@ class MyApp:
                           i.find('Image') == -1]
         else:
             self.masks = [i for i in os.listdir(base_path) if i.endswith('.npy') and
-                          i.find('Image') == -1 and i.find('Pred') != -1]
+                          i.find('Image') == -1 and i.find('Pred') != -1 and 'Write' not in i]
         self.mask_names = []
         if use_sitk:
             self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.mhd')]
         else:
             self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.npy') and
-                                i.find('Image') == -1 and i not in self.masks]
+                                i.find('Image') == -1 and i not in self.masks and 'Write' not in i]
         self.truth_names = []
         self.checkbox_vars = {}
         self.checkbox_truth = {}
@@ -121,7 +121,7 @@ class MyApp:
 
     def write_prediction(self):
         if np.max(self.mask_array) > 0:
-            np.save(os.path.join(self.base_path, "Write_AI_Predictions.npy"), self.mask_array)
+            np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), self.mask_array.astype('bool'))
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
@@ -173,6 +173,7 @@ class MyApp:
         for mask_name in self.checked_masks:
             mask_slice = self.mask_arrays[mask_name]
             self.mask_array += mask_slice
+        self.mask_array = (self.mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else self.mask_array
         self.truth_array = np.zeros(self.image_array.shape)
         for truth_name in self.checked_truth:
             mask_slice = self.mask_arrays[truth_name]
@@ -194,8 +195,7 @@ class MyApp:
             green = [0, 255, 0]
             red = [255, 0, 0]
             blue = [0, 0, 255]
-            total_mask = self.mask_array[slice_index, ...]
-            pred_slice = (total_mask == len(self.checked_masks)).astype('int') if self.checked_masks else total_mask
+            pred_slice = self.mask_array[slice_index, ...]
 
             total_truth = self.truth_array[slice_index]
             truth_slice = (total_truth > 0).astype('int')
@@ -245,6 +245,8 @@ def run_model(path):
     root.title("Confidence-Based Color Wash with Multiple Masks")
     myapp = MyApp(root, path)
     root.mainloop()
+    fid = open(os.path.join(path, "Close.txt"), 'w+')
+    fid.close()
 
 
 if __name__ == '__main__':
