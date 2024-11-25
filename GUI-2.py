@@ -122,6 +122,8 @@ class MyApp:
     def write_prediction(self):
         if np.max(self.mask_array) > 0:
             np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), self.mask_array.astype('bool'))
+            fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
+            fid.close()
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
