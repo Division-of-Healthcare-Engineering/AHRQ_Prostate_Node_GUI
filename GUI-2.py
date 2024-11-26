@@ -33,12 +33,18 @@ class MyApp:
         self.base_path = base_path
         self.image_array = None
         self.truth_array = None
+        self.mask_array = None
         self.parent = parent
         self.parent.minsize(600, 450)
         self.is_loading_image = False
+        self.zoom_level = 1.0  # New zoom level
+        self.offset_x = 0
+        self.offset_y = 0
 
-        # Bind the window resize event
+        # Bind the window resize and zoom events
         self.resize_event = self.parent.bind("<Configure>", self.on_resize)
+        self.zoom_event = self.parent.bind("<Control-MouseWheel>", self.on_zoom)
+        self.scroll_event = self.parent.bind("<MouseWheel>", self.on_slice_scroll_wheel)
 
         # Main container
         self.main_container = Frame(parent, background=self.bg1)
@@ -71,9 +77,6 @@ class MyApp:
 
         self.mid_frame.grid_columnconfigure(0, weight=1)
 
-        # self.load_button = Button(self.mid_frame, text="Show Wash", command=self.load_image, background=self.bg1,
-        #                           relief="groove")
-        # self.load_button.grid(row=1, column=0, sticky="ew", ipadx=20)
         self.mask_arrays = {}
         self.checked_masks = []
         self.checked_truth = []
@@ -84,18 +87,18 @@ class MyApp:
                           i.find('Image') == -1]
         else:
             self.masks = [i for i in os.listdir(base_path) if i.endswith('.npy') and
-                          i.find('Image') == -1 and i.find('Pred') != -1]
+                          i.find('Image') == -1 and i.find('Pred') != -1 and 'Write' not in i]
         self.mask_names = []
         if use_sitk:
             self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.mhd')]
         else:
             self.truth_files = [i for i in os.listdir(self.base_path) if i.endswith('.npy') and
-                                i.find('Image') == -1 and i not in self.masks]
+                                i.find('Image') == -1 and i not in self.masks and 'Write' not in i]
         self.truth_names = []
         self.checkbox_vars = {}
         self.checkbox_truth = {}
         base_inx = 0
-        for idx, file_name in enumerate(self.masks):
+        for file_name in self.masks:
             key = file_name
             if 'CTV_Pelvis' in file_name:
                 key = file_name.split('CTV_Pelvis_')[1]
@@ -104,17 +107,53 @@ class MyApp:
             self.checkbox_vars[key] = var
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
             self.mask_names.append(key)
-            cb.grid(row=idx, column=0, sticky="w")
-            base_inx = idx
-        base_inx += 1
-        for idx, file_name in enumerate(self.truth_files):
+            cb.grid(row=base_inx, column=0, sticky="w")
+            base_inx += 1
+
+        for file_name in self.truth_files:
             key = file_name.split('.')[0]
             var = IntVar(value=0)
             self.checkbox_truth[key] = var
             self.truth_names.append(key)
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
-            cb.grid(row=idx + base_inx, column=0, sticky="w")
+            cb.grid(row=base_inx, column=0, sticky="w")
+            base_inx += 1
+
+        self.load_button = Button(self.right_frame, text="Write Prediction", command=self.write_prediction, background=self.bg1,
+                                  relief="groove")
+        self.load_button.grid(row=base_inx, column=0, sticky="ew", ipadx=20)
         self.load_image()
+
+    def write_prediction(self):
+        if np.max(self.mask_array) > 0:
+            np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), self.mask_array.astype('bool'))
+            fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
+            fid.close()
+
+    def on_zoom(self, event):
+        """Handle zooming in and out, centered on the mouse position"""
+        zoom_factor = 1.1 if event.delta > 0 else 0.9
+        new_zoom_level = self.zoom_level * zoom_factor
+
+        # Get the current mouse position relative to the canvas
+        mouse_x, mouse_y = event.x, event.y
+
+        # Calculate the real position of the mouse in the image before zoom
+        real_mouse_x_before_zoom = (mouse_x - self.offset_x) / self.zoom_level
+        real_mouse_y_before_zoom = (mouse_y - self.offset_y) / self.zoom_level
+
+        # Update the zoom level
+        self.zoom_level = new_zoom_level
+
+        # Calculate the new offset to keep the zoom centered at the mouse position
+        real_mouse_x_after_zoom = real_mouse_x_before_zoom * self.zoom_level
+        real_mouse_y_after_zoom = real_mouse_y_before_zoom * self.zoom_level
+
+        self.offset_x = mouse_x - real_mouse_x_after_zoom
+        self.offset_y = mouse_y - real_mouse_y_after_zoom
+
+        # Redisplay the current slice with the new zoom level
+        self.display_slice(self.current_slice)
 
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
@@ -126,17 +165,15 @@ class MyApp:
                 self.image_array = sitk.GetArrayFromImage(img)
             else:
                 self.image_array = np.load(image_path)
+            min_val, max_val = -200,  300
+            dif = max_val - min_val if max_val != min_val else 1
+            self.image_array = (self.image_array - min_val)/dif * 255
+            self.image_array = np.clip(self.image_array, 0, 255)
             self.truth_array = np.zeros(self.image_array.shape)
             # print(f"Image shape: {self.image_array.shape}")
-            if self.truth_files:
-                if use_sitk:
-                    truth = sitk.ReadImage(os.path.join(self.base_path, self.truth_files[0]))
-                    self.truth_array = sitk.GetArrayFromImage(truth)
-                else:
-                    self.truth_array = np.load(os.path.join(self.base_path, self.truth_files[0]))
             # print(f"Ground truth shape: {self.truth_array.shape}")
-
             self.mask_arrays = {}
+            self.mask_array = np.zeros(self.image_array.shape)
             for key, file_name in zip(self.mask_names + self.truth_names, self.masks + self.truth_files):
                 if use_sitk:
                     mask = sitk.ReadImage(os.path.join(self.base_path, file_name))
@@ -164,6 +201,15 @@ class MyApp:
     def on_checkbox_toggle(self):
         self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
         self.checked_truth = [key for key, var in self.checkbox_truth.items() if var.get() == 1]
+        self.mask_array = np.zeros(self.image_array.shape)
+        for mask_name in self.checked_masks:
+            mask_slice = self.mask_arrays[mask_name]
+            self.mask_array += mask_slice
+        self.mask_array = (self.mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else self.mask_array
+        self.truth_array = np.zeros(self.image_array.shape)
+        for truth_name in self.checked_truth:
+            mask_slice = self.mask_arrays[truth_name]
+            self.truth_array += mask_slice
         self.display_slice(self.current_slice)
 
     def on_slice_scroll(self, value):
@@ -171,32 +217,34 @@ class MyApp:
             self.current_slice = int(value)
             self.display_slice(self.current_slice)
 
+    def on_slice_scroll_wheel(self, event):
+        """Handle scrolling through slices using the mouse wheel"""
+        if event.delta > 0:
+            # Scroll up, decrease the slice index
+            self.current_slice = max(0, self.current_slice - 1)
+        else:
+            # Scroll down, increase the slice index
+            self.current_slice = min(self.current_slice + 1, self.image_array.shape[0] - 1)
+
+        # Update the scrollbar position
+        self.slice_scrollbar.set(self.current_slice)
+
+        # Display the new slice
+        self.display_slice(self.current_slice)
+
     def on_confidence_scroll(self, value):
         self.display_slice(self.current_slice)
 
     def display_slice(self, slice_index):
         try:
-            min_val, max_val = -200,  300
-            dif = max_val - min_val if max_val != min_val else 1
             img_slice = self.image_array[slice_index, :, :]
-
-            img_slice = (img_slice - min_val)/dif * 255
-            img_slice = np.clip(img_slice, 0, 255)
             img_rgb = np.stack((img_slice, img_slice, img_slice), axis=-1).astype(np.uint8)
-
             green = [0, 255, 0]
             red = [255, 0, 0]
             blue = [0, 0, 255]
-            total_mask = np.zeros(img_slice.shape)
-            for mask_name in self.checked_masks:
-                mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
-                total_mask += mask_slice
-            pred_slice = (total_mask == len(self.checked_masks)).astype('int') if self.checked_masks else total_mask
+            pred_slice = self.mask_array[slice_index, ...]
 
-            total_truth = np.zeros(img_slice.shape)
-            for truth_name in self.checked_truth:
-                mask_slice = self.mask_arrays[truth_name][slice_index, :, :]
-                total_truth += mask_slice
+            total_truth = self.truth_array[slice_index]
             truth_slice = (total_truth > 0).astype('int')
             """
             Make a green outline where we have a prediction, but not the ground truth
@@ -216,16 +264,25 @@ class MyApp:
 
             img_rgb[green_outline] = green
             img_rgb[red_outline] = red
-            # img_rgb[blue_outline] = blue
 
-            window_width = min(self.parent.winfo_width() - 50, 512)
-            window_height = min(self.parent.winfo_height() - 100, 512)
-            window_width = img_rgb.shape[0]
-            window_height = img_rgb.shape[1]
-            pil_image = Image.fromarray(img_rgb)#.resize((window_width, window_height), Image.Resampling.LANCZOS)
-            tk_image = ImageTk.PhotoImage(image=pil_image)
+            # Resize the image according to the zoom level
+            width, height = img_rgb.shape[1], img_rgb.shape[0]
+            new_width, new_height = int(width * self.zoom_level), int(height * self.zoom_level)
 
-            self.canvas.config(width=window_width, height=window_height)
+            pil_image = Image.fromarray(img_rgb)
+            pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            # Create a region to display based on offsets
+            display_image = pil_image.crop(
+                (max(0, -self.offset_x),
+                 max(0, -self.offset_y),
+                 min(new_width, self.canvas.winfo_width() - self.offset_x),
+                 min(new_height, self.canvas.winfo_height() - self.offset_y))
+            )
+
+            tk_image = ImageTk.PhotoImage(display_image)
+
+            self.canvas.config(scrollregion=(0, 0, new_width, new_height), width=512, height=512)
             self.canvas.delete("all")
             self.canvas.create_image(0, 0, anchor="nw", image=tk_image)
             self.canvas.image = tk_image
@@ -244,6 +301,8 @@ def run_model(path):
     root.title("Confidence-Based Color Wash with Multiple Masks")
     myapp = MyApp(root, path)
     root.mainloop()
+    fid = open(os.path.join(path, "Close.txt"), 'w+')
+    fid.close()
 
 
 if __name__ == '__main__':
