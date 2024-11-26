@@ -52,8 +52,6 @@ class MyApp:
         self.bg1 = '#717171'
         self.base_path = base_path
         self.image_array = None
-        self.truth_array = None
-        self.mask_array = None
         self.parent = parent
         self.parent.minsize(600, 450)
         self.is_loading_image = False
@@ -145,8 +143,13 @@ class MyApp:
         self.load_image()
 
     def write_prediction(self):
-        if np.max(self.mask_array) > 0:
-            np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), self.mask_array.astype('bool'))
+        mask_array = np.zeros(self.image_array.shape)
+        for mask_name in self.checked_masks:
+            mask_slice = self.mask_arrays[mask_name]
+            mask_array += mask_slice
+        mask_array = (mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else mask_array
+        if np.max(mask_array) > 0:
+            np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), mask_array.astype('bool'))
             fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
             fid.close()
 
@@ -189,11 +192,8 @@ class MyApp:
             dif = max_val - min_val if max_val != min_val else 1
             self.image_array = (self.image_array - min_val)/dif * 255
             self.image_array = np.clip(self.image_array, 0, 255)
-            self.truth_array = np.zeros(self.image_array.shape)
-            # print(f"Image shape: {self.image_array.shape}")
-            # print(f"Ground truth shape: {self.truth_array.shape}")
+
             self.mask_arrays = {}
-            self.mask_array = np.zeros(self.image_array.shape)
             for key, file_name in zip(self.mask_names + self.truth_names, self.masks + self.truth_files):
                 if use_sitk:
                     mask = sitk.ReadImage(os.path.join(self.base_path, file_name))
@@ -206,7 +206,8 @@ class MyApp:
                 self.mask_arrays[key] = mask_array
                 # print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
-            shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape, self.truth_array.shape]
+            shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape,
+                                                                         self.image_array.shape]
             if not all(shape == shapes[0] for shape in shapes):
                 raise ValueError("Shape mismatch between image and masks after resampling.")
 
