@@ -27,6 +27,26 @@ def resample_to_match(image, target_shape):
     return resampler.Execute(image)
 
 
+def resize_nearest_neighbor(image, new_height, new_width):
+    old_height, old_width = image.shape[:2]
+
+    # Calculate the scaling factors
+    row_ratio, col_ratio = old_height / new_height, old_width / new_width
+
+    # Create index arrays for the resized image dimensions
+    row_indices = (np.arange(new_height) * row_ratio).astype(int)
+    col_indices = (np.arange(new_width) * col_ratio).astype(int)
+
+    # Clip indices to be within the bounds of the original image
+    row_indices = np.clip(row_indices, 0, old_height - 1)
+    col_indices = np.clip(col_indices, 0, old_width - 1)
+
+    # Use advanced indexing to map the new image to the old image
+    resized_image = image[row_indices[:, None], col_indices]
+
+    return resized_image
+
+
 class MyApp:
     def __init__(self, parent, base_path):
         self.bg1 = '#717171'
@@ -269,8 +289,9 @@ class MyApp:
             width, height = img_rgb.shape[1], img_rgb.shape[0]
             new_width, new_height = int(width * self.zoom_level), int(height * self.zoom_level)
 
+            img_rgb  = resize_nearest_neighbor(img_rgb, new_height, new_width)
             pil_image = Image.fromarray(img_rgb)
-            pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            # pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
             # Create a region to display based on offsets
             display_image = pil_image.crop(
