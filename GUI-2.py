@@ -37,9 +37,14 @@ class MyApp:
         self.parent = parent
         self.parent.minsize(600, 450)
         self.is_loading_image = False
+        self.zoom_level = 1.0  # New zoom level
+        self.offset_x = 0
+        self.offset_y = 0
 
-        # Bind the window resize event
+        # Bind the window resize and zoom events
         self.resize_event = self.parent.bind("<Configure>", self.on_resize)
+        self.zoom_event = self.parent.bind("<Control-MouseWheel>", self.on_zoom)
+        self.scroll_event = self.parent.bind("<MouseWheel>", self.on_slice_scroll_wheel)
 
         # Main container
         self.main_container = Frame(parent, background=self.bg1)
@@ -125,6 +130,31 @@ class MyApp:
             fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
             fid.close()
 
+    def on_zoom(self, event):
+        """Handle zooming in and out, centered on the mouse position"""
+        zoom_factor = 1.1 if event.delta > 0 else 0.9
+        new_zoom_level = self.zoom_level * zoom_factor
+
+        # Get the current mouse position relative to the canvas
+        mouse_x, mouse_y = event.x, event.y
+
+        # Calculate the real position of the mouse in the image before zoom
+        real_mouse_x_before_zoom = (mouse_x - self.offset_x) / self.zoom_level
+        real_mouse_y_before_zoom = (mouse_y - self.offset_y) / self.zoom_level
+
+        # Update the zoom level
+        self.zoom_level = new_zoom_level
+
+        # Calculate the new offset to keep the zoom centered at the mouse position
+        real_mouse_x_after_zoom = real_mouse_x_before_zoom * self.zoom_level
+        real_mouse_y_after_zoom = real_mouse_y_before_zoom * self.zoom_level
+
+        self.offset_x = mouse_x - real_mouse_x_after_zoom
+        self.offset_y = mouse_y - real_mouse_y_after_zoom
+
+        # Redisplay the current slice with the new zoom level
+        self.display_slice(self.current_slice)
+
     def load_image(self):
         """ Load a NIfTI image, ground truth mask, and five additional masks. """
         image_file = "Image.nii" if use_sitk else 'Image.npy'
@@ -187,6 +217,21 @@ class MyApp:
             self.current_slice = int(value)
             self.display_slice(self.current_slice)
 
+    def on_slice_scroll_wheel(self, event):
+        """Handle scrolling through slices using the mouse wheel"""
+        if event.delta > 0:
+            # Scroll up, decrease the slice index
+            self.current_slice = max(0, self.current_slice - 1)
+        else:
+            # Scroll down, increase the slice index
+            self.current_slice = min(self.current_slice + 1, self.image_array.shape[0] - 1)
+
+        # Update the scrollbar position
+        self.slice_scrollbar.set(self.current_slice)
+
+        # Display the new slice
+        self.display_slice(self.current_slice)
+
     def on_confidence_scroll(self, value):
         self.display_slice(self.current_slice)
 
@@ -219,16 +264,25 @@ class MyApp:
 
             img_rgb[green_outline] = green
             img_rgb[red_outline] = red
-            # img_rgb[blue_outline] = blue
 
-            window_width = min(self.parent.winfo_width() - 50, 512)
-            window_height = min(self.parent.winfo_height() - 100, 512)
-            window_width = img_rgb.shape[0]
-            window_height = img_rgb.shape[1]
-            pil_image = Image.fromarray(img_rgb)#.resize((window_width, window_height), Image.Resampling.LANCZOS)
-            tk_image = ImageTk.PhotoImage(image=pil_image)
+            # Resize the image according to the zoom level
+            width, height = img_rgb.shape[1], img_rgb.shape[0]
+            new_width, new_height = int(width * self.zoom_level), int(height * self.zoom_level)
 
-            self.canvas.config(width=window_width, height=window_height)
+            pil_image = Image.fromarray(img_rgb)
+            pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            # Create a region to display based on offsets
+            display_image = pil_image.crop(
+                (max(0, -self.offset_x),
+                 max(0, -self.offset_y),
+                 min(new_width, self.canvas.winfo_width() - self.offset_x),
+                 min(new_height, self.canvas.winfo_height() - self.offset_y))
+            )
+
+            tk_image = ImageTk.PhotoImage(display_image)
+
+            self.canvas.config(scrollregion=(0, 0, new_width, new_height), width=512, height=512)
             self.canvas.delete("all")
             self.canvas.create_image(0, 0, anchor="nw", image=tk_image)
             self.canvas.image = tk_image
