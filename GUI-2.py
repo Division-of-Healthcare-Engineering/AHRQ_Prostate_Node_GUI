@@ -221,15 +221,6 @@ class MyApp:
     def on_checkbox_toggle(self):
         self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
         self.checked_truth = [key for key, var in self.checkbox_truth.items() if var.get() == 1]
-        self.mask_array = np.zeros(self.image_array.shape)
-        for mask_name in self.checked_masks:
-            mask_slice = self.mask_arrays[mask_name]
-            self.mask_array += mask_slice
-        self.mask_array = (self.mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else self.mask_array
-        self.truth_array = np.zeros(self.image_array.shape)
-        for truth_name in self.checked_truth:
-            mask_slice = self.mask_arrays[truth_name]
-            self.truth_array += mask_slice
         self.display_slice(self.current_slice)
 
     def on_slice_scroll(self, value):
@@ -262,10 +253,18 @@ class MyApp:
             green = [0, 255, 0]
             red = [255, 0, 0]
             blue = [0, 0, 255]
-            pred_slice = self.mask_array[slice_index, ...]
+            pred_slice = np.zeros(img_slice.shape)
+            for mask_name in self.checked_masks:
+                mask_slice = self.mask_arrays[mask_name][slice_index]
+                pred_slice += mask_slice
+            pred_slice = (pred_slice == len(self.checked_masks)).astype('int') if self.checked_masks else pred_slice
 
-            total_truth = self.truth_array[slice_index]
-            truth_slice = (total_truth > 0).astype('int')
+            truth_slice = np.zeros(img_slice.shape)
+            for truth_name in self.checked_truth:
+                mask_slice = self.mask_arrays[truth_name][slice_index]
+                truth_slice += mask_slice
+
+            truth_slice = (truth_slice > 0).astype('int')
             """
             Make a green outline where we have a prediction, but not the ground truth
             """
