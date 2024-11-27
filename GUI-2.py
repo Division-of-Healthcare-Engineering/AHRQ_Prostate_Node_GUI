@@ -52,8 +52,6 @@ class MyApp:
         self.bg1 = '#717171'
         self.base_path = base_path
         self.image_array = None
-        self.truth_array = None
-        self.mask_array = None
         self.parent = parent
         self.parent.minsize(600, 450)
         self.is_loading_image = False
@@ -145,8 +143,13 @@ class MyApp:
         self.load_image()
 
     def write_prediction(self):
-        if np.max(self.mask_array) > 0:
-            np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), self.mask_array.astype('bool'))
+        mask_array = np.zeros(self.image_array.shape)
+        for mask_name in self.checked_masks:
+            mask_slice = self.mask_arrays[mask_name]
+            mask_array += mask_slice
+        mask_array = (mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else mask_array
+        if np.max(mask_array) > 0:
+            np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), mask_array.astype('bool'))
             fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
             fid.close()
 
@@ -189,11 +192,8 @@ class MyApp:
             dif = max_val - min_val if max_val != min_val else 1
             self.image_array = (self.image_array - min_val)/dif * 255
             self.image_array = np.clip(self.image_array, 0, 255)
-            self.truth_array = np.zeros(self.image_array.shape)
-            # print(f"Image shape: {self.image_array.shape}")
-            # print(f"Ground truth shape: {self.truth_array.shape}")
+
             self.mask_arrays = {}
-            self.mask_array = np.zeros(self.image_array.shape)
             for key, file_name in zip(self.mask_names + self.truth_names, self.masks + self.truth_files):
                 if use_sitk:
                     mask = sitk.ReadImage(os.path.join(self.base_path, file_name))
@@ -206,7 +206,8 @@ class MyApp:
                 self.mask_arrays[key] = mask_array
                 # print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
-            shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape, self.truth_array.shape]
+            shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape,
+                                                                         self.image_array.shape]
             if not all(shape == shapes[0] for shape in shapes):
                 raise ValueError("Shape mismatch between image and masks after resampling.")
 
@@ -221,15 +222,6 @@ class MyApp:
     def on_checkbox_toggle(self):
         self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
         self.checked_truth = [key for key, var in self.checkbox_truth.items() if var.get() == 1]
-        self.mask_array = np.zeros(self.image_array.shape)
-        for mask_name in self.checked_masks:
-            mask_slice = self.mask_arrays[mask_name]
-            self.mask_array += mask_slice
-        self.mask_array = (self.mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else self.mask_array
-        self.truth_array = np.zeros(self.image_array.shape)
-        for truth_name in self.checked_truth:
-            mask_slice = self.mask_arrays[truth_name]
-            self.truth_array += mask_slice
         self.display_slice(self.current_slice)
 
     def on_slice_scroll(self, value):
@@ -262,10 +254,18 @@ class MyApp:
             green = [0, 255, 0]
             red = [255, 0, 0]
             blue = [0, 0, 255]
-            pred_slice = self.mask_array[slice_index, ...]
+            pred_slice = np.zeros(img_slice.shape)
+            for mask_name in self.checked_masks:
+                mask_slice = self.mask_arrays[mask_name][slice_index]
+                pred_slice += mask_slice
+            pred_slice = (pred_slice == len(self.checked_masks)).astype('int') if self.checked_masks else pred_slice
 
-            total_truth = self.truth_array[slice_index]
-            truth_slice = (total_truth > 0).astype('int')
+            truth_slice = np.zeros(img_slice.shape)
+            for truth_name in self.checked_truth:
+                mask_slice = self.mask_arrays[truth_name][slice_index]
+                truth_slice += mask_slice
+
+            truth_slice = (truth_slice > 0).astype('int')
             """
             Make a green outline where we have a prediction, but not the ground truth
             """
