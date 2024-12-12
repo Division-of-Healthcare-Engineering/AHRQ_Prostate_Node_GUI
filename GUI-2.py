@@ -251,7 +251,7 @@ class MyApp:
         try:
             img_slice = self.image_array[slice_index, :, :]
             img_rgb = np.stack((img_slice, img_slice, img_slice), axis=-1).astype(np.uint8)
-            green = [0, 255, 0]
+            green = [123, 175, 212]
             red = [255, 0, 0]
             blue = [0, 0, 255]
             pred_slice = np.zeros(img_slice.shape)
