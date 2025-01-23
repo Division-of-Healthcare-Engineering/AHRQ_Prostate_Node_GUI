@@ -1,6 +1,7 @@
 #!/usr/bin/python
 import os
 from tkinter import *
+from tkinter.ttk import Combobox
 use_sitk = True
 try:
     import SimpleITK as sitk
@@ -50,6 +51,7 @@ def resize_nearest_neighbor(image, new_height, new_width):
 class MyApp:
     def __init__(self, parent, base_path):
         self.bg1 = '#717171'
+        self.bg2 = '#f5eded'
         self.base_path = base_path
         self.image_array = None
         self.parent = parent
@@ -128,6 +130,14 @@ class MyApp:
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
 
+        # Combobox for Intersection vs. Union
+        self.intersection_union_combobox = Combobox(self.right_frame, values=["Intersection", "Union"],
+                                                        state='readonly')
+        self.intersection_union_combobox.current(0)  # Default to "Intersection"
+        self.intersection_union_combobox.grid(row=base_inx, column=0, sticky="ew")
+        self.intersection_union_combobox.bind("<<ComboboxSelected>>", self.on_combobox_select)
+        base_inx += 2
+
         for file_name in self.truth_files:
             key = file_name.split('.')[0]
             var = IntVar(value=0)
@@ -136,18 +146,36 @@ class MyApp:
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
-
-        self.load_button = Button(self.right_frame, text="Write Prediction", command=self.write_prediction, background=self.bg1,
-                                  relief="groove")
+        self.my_textbox = Text(self.right_frame, width=30, height=2)
+        self.my_textbox.insert("end", "Writing Tools\n"
+                                      "Hold Ctrl to zoom\n")
+        self.my_textbox.config(state="disabled")  # Make read-only
+        self.my_textbox.grid(row=base_inx, column=0, sticky="ew", padx=5, pady=5)
+        base_inx += 1
+        # "Write Prediction" button
+        self.load_button = Button(self.right_frame, text="Write Prediction",
+                                  command=self.write_prediction, background=self.bg2, relief="groove",
+                                  state='disabled')
         self.load_button.grid(row=base_inx, column=0, sticky="ew", ipadx=20)
+        base_inx += 1
         self.load_image()
+
+    def on_combobox_select(self, event):
+        """Triggered whenever a new item is selected in the combobox."""
+        self.display_slice(self.current_slice)
 
     def write_prediction(self):
         mask_array = np.zeros(self.image_array.shape)
         for mask_name in self.checked_masks:
             mask_slice = self.mask_arrays[mask_name]
             mask_array += mask_slice
-        mask_array = (mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else mask_array
+        # Use the current combobox selection to determine how the final mask is computed
+        combobox_item = self.intersection_union_combobox.get()
+        if self.checked_masks:
+            if combobox_item == 'Intersection':
+                mask_array = (mask_array == len(self.checked_masks)).astype('int')
+            else:
+                mask_array = (mask_array > 0).astype('int')
         if np.max(mask_array) > 0:
             np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), mask_array.astype('bool'))
             fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
@@ -188,7 +216,8 @@ class MyApp:
                 self.image_array = sitk.GetArrayFromImage(img)
             else:
                 self.image_array = np.load(image_path)
-            min_val, max_val = -200,  300
+
+            min_val, max_val = -200, 300
             dif = max_val - min_val if max_val != min_val else 1
             self.image_array = (self.image_array - min_val)/dif * 255
             self.image_array = np.clip(self.image_array, 0, 255)
@@ -204,7 +233,6 @@ class MyApp:
                 else:
                     mask_array = np.load(os.path.join(self.base_path, file_name))
                 self.mask_arrays[key] = mask_array
-                # print(f"Mask '{key}' shape after resampling: {self.mask_arrays[key].shape}")
 
             shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape,
                                                                          self.image_array.shape]
@@ -221,6 +249,9 @@ class MyApp:
 
     def on_checkbox_toggle(self):
         self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
+        self.load_button.config(state='disabled')
+        if self.checked_masks:
+            self.load_button.config(state='normal')
         self.checked_truth = [key for key, var in self.checkbox_truth.items() if var.get() == 1]
         self.display_slice(self.current_slice)
 
@@ -244,9 +275,6 @@ class MyApp:
         # Display the new slice
         self.display_slice(self.current_slice)
 
-    def on_confidence_scroll(self, value):
-        self.display_slice(self.current_slice)
-
     def display_slice(self, slice_index):
         try:
             img_slice = self.image_array[slice_index, :, :]
@@ -258,13 +286,20 @@ class MyApp:
             for mask_name in self.checked_masks:
                 mask_slice = self.mask_arrays[mask_name][slice_index]
                 pred_slice += mask_slice
-            pred_slice = (pred_slice == len(self.checked_masks)).astype('int') if self.checked_masks else pred_slice
 
+            # Determine final pred_slice based on combobox selection
+            combobox_item = self.intersection_union_combobox.get()
+            if self.checked_masks:
+                if combobox_item == 'Intersection':
+                    pred_slice = (pred_slice == len(self.checked_masks)).astype('int')
+                else:
+                    pred_slice = (pred_slice > 0).astype('int')
+
+            # Build the truth mask from the checked truth
             truth_slice = np.zeros(img_slice.shape)
             for truth_name in self.checked_truth:
                 mask_slice = self.mask_arrays[truth_name][slice_index]
                 truth_slice += mask_slice
-
             truth_slice = (truth_slice > 0).astype('int')
             """
             Make a green outline where we have a prediction, but not the ground truth
