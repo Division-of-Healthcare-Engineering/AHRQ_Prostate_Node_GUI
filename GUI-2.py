@@ -1,7 +1,11 @@
 #!/usr/bin/python
 import os
 from tkinter import *
+<<<<<<< HEAD
 from tkinter.ttk import Combobox
+=======
+from tkinter import ttk  # Import for Combobox
+>>>>>>> fb66c7b0b090ba3ef6dc262b2acad54653287ef7
 use_sitk = True
 try:
     import SimpleITK as sitk
@@ -10,7 +14,6 @@ except:
 from PIL import Image, ImageTk
 import numpy as np
 from scipy.ndimage import binary_dilation
-
 
 def resample_to_match(image, target_shape):
     original_spacing = np.array(image.GetSpacing())
@@ -27,26 +30,19 @@ def resample_to_match(image, target_shape):
     resampler.SetInterpolator(sitk.sitkNearestNeighbor)
     return resampler.Execute(image)
 
-
 def resize_nearest_neighbor(image, new_height, new_width):
     old_height, old_width = image.shape[:2]
-
     # Calculate the scaling factors
     row_ratio, col_ratio = old_height / new_height, old_width / new_width
-
     # Create index arrays for the resized image dimensions
     row_indices = (np.arange(new_height) * row_ratio).astype(int)
     col_indices = (np.arange(new_width) * col_ratio).astype(int)
-
     # Clip indices to be within the bounds of the original image
     row_indices = np.clip(row_indices, 0, old_height - 1)
     col_indices = np.clip(col_indices, 0, old_width - 1)
-
     # Use advanced indexing to map the new image to the old image
     resized_image = image[row_indices[:, None], col_indices]
-
     return resized_image
-
 
 class MyApp:
     def __init__(self, parent, base_path):
@@ -132,7 +128,7 @@ class MyApp:
 
         # Combobox for Intersection vs. Union
         self.intersection_union_combobox = Combobox(self.right_frame, values=["Intersection", "Union"],
-                                                        state='readonly')
+                                                    state='readonly')
         self.intersection_union_combobox.current(0)  # Default to "Intersection"
         self.intersection_union_combobox.grid(row=base_inx, column=0, sticky="ew")
         self.intersection_union_combobox.bind("<<ComboboxSelected>>", self.on_combobox_select)
@@ -360,7 +356,6 @@ def run_model(path):
     fid = open(os.path.join(path, "Close.txt"), 'w+')
     fid.close()
 
-
 if __name__ == '__main__':
-    path = r'\\vscifs1\PhysicsQAdata\BMA\Predictions\ProstateNodes\Output\1.3.46.670589.33.1.63862355173814227200001.5286669292534571828'
+    path = r'\\vscifs1\PhysicsQAdata\BMA\Predictions\ProstateNodes\Output\1.3.12.2.1107.5.1.7.130063.30000023071909191039900000262'
     run_model(path)
