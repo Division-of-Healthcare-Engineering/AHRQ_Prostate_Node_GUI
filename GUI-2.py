@@ -327,5 +327,5 @@ def run_model(path):
 
 
 if __name__ == '__main__':
-    path = r'\\vscifs1\PhysicsQAdata\BMA\Predictions\ProstateNodes\Output\1.3.46.670589.33.1.63862355173814227200001.5286669292534571828'
+    path = r'\\vscifs1\PhysicsQAdata\BMA\Predictions\ProstateNodes\Output\1.3.12.2.1107.5.1.7.130063.30000023071909191039900000262'
     run_model(path)
