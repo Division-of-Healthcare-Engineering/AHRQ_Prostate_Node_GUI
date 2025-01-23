@@ -43,6 +43,7 @@ def resize_nearest_neighbor(image, new_height, new_width):
 class MyApp:
     def __init__(self, parent, base_path):
         self.bg1 = '#717171'
+        self.bg2 = '#f5eded'
         self.base_path = base_path
         self.image_array = None
         self.parent = parent
@@ -137,10 +138,16 @@ class MyApp:
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
-
+        self.my_textbox = Text(self.right_frame, width=30, height=2)
+        self.my_textbox.insert("end", "Writing Tools\n"
+                                      "Hold Ctrl to zoom\n")
+        self.my_textbox.config(state="disabled")  # Make read-only
+        self.my_textbox.grid(row=base_inx, column=0, sticky="ew", padx=5, pady=5)
+        base_inx += 1
         # "Write Prediction" button
         self.load_button = Button(self.right_frame, text="Write Prediction",
-                                  command=self.write_prediction, background=self.bg1, relief="groove")
+                                  command=self.write_prediction, background=self.bg2, relief="groove",
+                                  state='disabled')
         self.load_button.grid(row=base_inx, column=0, sticky="ew", ipadx=20)
         base_inx += 1
         self.load_image()
@@ -234,6 +241,9 @@ class MyApp:
 
     def on_checkbox_toggle(self):
         self.checked_masks = [key for key, var in self.checkbox_vars.items() if var.get() == 1]
+        self.load_button.config(state='disabled')
+        if self.checked_masks:
+            self.load_button.config(state='normal')
         self.checked_truth = [key for key, var in self.checkbox_truth.items() if var.get() == 1]
         self.display_slice(self.current_slice)
 
