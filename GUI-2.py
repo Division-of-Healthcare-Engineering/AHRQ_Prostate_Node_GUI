@@ -233,10 +233,10 @@ class MyApp:
         """Handle scrolling through slices using the mouse wheel"""
         if event.delta > 0:
             # Scroll up, decrease the slice index
-            self.current_slice = max(0, self.current_slice - 1)
+            self.current_slice = min(self.current_slice + 1, self.image_array.shape[0] - 1)
         else:
             # Scroll down, increase the slice index
-            self.current_slice = min(self.current_slice + 1, self.image_array.shape[0] - 1)
+            self.current_slice = max(0, self.current_slice - 1)
 
         # Update the scrollbar position
         self.slice_scrollbar.set(self.current_slice)
