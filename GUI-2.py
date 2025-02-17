@@ -16,10 +16,8 @@ from scipy.ndimage import binary_dilation
 def resample_to_match(image, target_shape):
     original_spacing = np.array(image.GetSpacing())
     original_size = np.array(image.GetSize())
-
     target_size = target_shape[::-1]
     new_spacing = original_spacing * (original_size / target_size)
-
     resampler = sitk.ResampleImageFilter()
     resampler.SetOutputSpacing(new_spacing.tolist())
     resampler.SetSize([int(sz) for sz in target_size])
@@ -162,6 +160,14 @@ class MyApp:
                                   background=self.bg1, relief="groove")
         self.load_button.grid(row=base_inx+1, column=0, sticky="ew", ipadx=20)
 
+        # Add the "Switch View" button below the checkboxes.
+        self.switch_view_button = Button(self.right_frame, text="Switch View", command=self.switch_view,
+                                         background=self.bg1, relief="groove")
+        self.switch_view_button.grid(row=base_inx, column=0, sticky="ew", pady=10)
+
+        self.load_button = Button(self.right_frame, text="Write Prediction", command=self.write_prediction,
+                                  background=self.bg1, relief="groove")
+        self.load_button.grid(row=base_inx+1, column=0, sticky="ew", ipadx=20)
         self.load_image()
 
     def update_slider_range(self):
@@ -335,9 +341,8 @@ class MyApp:
                     mask_slice = self.mask_arrays[truth_name][:, :, slice_index]
                 truth_slice += mask_slice
             truth_slice = (truth_slice > 0).astype('int')
-            """
-            Make a green outline where we have a prediction, but not the ground truth
-            """
+
+            # Create outlines.
             green_outline = (pred_slice > 0) & ~(truth_slice > 0)
             green_outline = binary_dilation(green_outline) & ~green_outline
             blue_outline = (pred_slice > 0) & (truth_slice == pred_slice) & (truth_slice > 0)
