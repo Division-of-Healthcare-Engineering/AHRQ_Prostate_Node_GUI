@@ -148,8 +148,7 @@ class MyApp:
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
         self.my_textbox = Text(self.right_frame, width=30, height=2)
-        self.my_textbox.insert("end", "Writing Tools\n"
-                                      "Hold Ctrl to zoom\n")
+        self.my_textbox.insert("end", "Hold Ctrl to zoom\n")
         self.my_textbox.config(state="disabled")  # Make read-only
         self.my_textbox.grid(row=base_inx, column=0, sticky="ew", padx=5, pady=5)
         base_inx += 1
@@ -197,6 +196,7 @@ class MyApp:
             mask_array += mask_slice
         mask_array = (mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else mask_array
         if np.max(mask_array) > 0:
+            mask_array = mask_array[::-1] # Have to flip it back
             np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), mask_array.astype('bool'))
             fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
             fid.close()
@@ -229,6 +229,7 @@ class MyApp:
                 self.image_array = sitk.GetArrayFromImage(img)
             else:
                 self.image_array = np.load(image_path)
+            self.image_array = self.image_array[::-1]
             min_val, max_val = -200, 300
             dif = max_val - min_val if max_val != min_val else 1
             self.image_array = (self.image_array - min_val) / dif * 255
@@ -243,6 +244,7 @@ class MyApp:
                     mask_array = sitk.GetArrayFromImage(mask)
                 else:
                     mask_array = np.load(os.path.join(self.base_path, file_name))
+                mask_array = mask_array[::-1]
                 self.mask_arrays[key] = mask_array
 
             shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape, self.image_array.shape]
