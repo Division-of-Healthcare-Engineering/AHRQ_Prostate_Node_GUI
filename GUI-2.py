@@ -1,6 +1,8 @@
 #!/usr/bin/python
 import os
 from tkinter import *
+from tkinter.ttk import Combobox
+
 use_sitk = True
 try:
     import SimpleITK as sitk
@@ -129,6 +131,14 @@ class MyApp:
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
 
+        # Combobox for Intersection vs. Union
+        self.intersection_union_combobox = Combobox(self.right_frame, values=["Intersection", "Union"],
+                                                    state='readonly')
+        self.intersection_union_combobox.current(0)  # Default to "Intersection"
+        self.intersection_union_combobox.grid(row=base_inx, column=0, sticky="ew")
+        self.intersection_union_combobox.bind("<<ComboboxSelected>>", self.on_combobox_select)
+        base_inx += 2
+
         for file_name in self.truth_files:
             key = file_name.split('.')[0]
             var = IntVar(value=0)
@@ -137,6 +147,12 @@ class MyApp:
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
+        self.my_textbox = Text(self.right_frame, width=30, height=2)
+        self.my_textbox.insert("end", "Writing Tools\n"
+                                      "Hold Ctrl to zoom\n")
+        self.my_textbox.config(state="disabled")  # Make read-only
+        self.my_textbox.grid(row=base_inx, column=0, sticky="ew", padx=5, pady=5)
+        base_inx += 1
 
         # Add the "Switch View" button below the checkboxes.
         self.switch_view_button = Button(self.right_frame, text="Switch View", command=self.switch_view,
@@ -197,6 +213,10 @@ class MyApp:
         real_mouse_y_after_zoom = real_mouse_y_before_zoom * self.zoom_level
         self.offset_x = mouse_x - real_mouse_x_after_zoom
         self.offset_y = mouse_y - real_mouse_y_after_zoom
+        self.display_slice(self.current_slice)
+
+    def on_combobox_select(self, event):
+        """Triggered whenever a new item is selected in the combobox."""
         self.display_slice(self.current_slice)
 
     def load_image(self):
@@ -296,7 +316,12 @@ class MyApp:
                 else:
                     mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
                 pred_slice += mask_slice
-            pred_slice = (pred_slice == len(self.checked_masks)).astype('int') if self.checked_masks else pred_slice
+            combobox_item = self.intersection_union_combobox.get()
+            if self.checked_masks:
+                if combobox_item == 'Intersection':
+                    pred_slice = (pred_slice == len(self.checked_masks)).astype('int')
+                else:
+                    pred_slice = (pred_slice > 0).astype('int')
 
             truth_slice = np.zeros(img_slice.shape)
             for truth_name in self.checked_truth:
