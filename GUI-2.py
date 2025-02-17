@@ -1,6 +1,8 @@
 #!/usr/bin/python
 import os
 from tkinter import *
+from tkinter.ttk import Combobox
+
 use_sitk = True
 try:
     import SimpleITK as sitk
@@ -60,6 +62,7 @@ class MyApp:
         self.resize_event = self.parent.bind("<Configure>", self.on_resize)
         self.zoom_event = self.parent.bind("<Control-MouseWheel>", self.on_zoom)
         self.scroll_event = self.parent.bind("<MouseWheel>", self.on_slice_scroll_wheel)
+        self._last_size = (0, 0)
 
         # Main container
         self.main_container = Frame(parent, background=self.bg1)
@@ -126,6 +129,14 @@ class MyApp:
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
 
+        # Combobox for Intersection vs. Union
+        self.intersection_union_combobox = Combobox(self.right_frame, values=["Intersection", "Union"],
+                                                    state='readonly')
+        self.intersection_union_combobox.current(0)  # Default to "Intersection"
+        self.intersection_union_combobox.grid(row=base_inx, column=0, sticky="ew")
+        self.intersection_union_combobox.bind("<<ComboboxSelected>>", self.on_combobox_select)
+        base_inx += 2
+
         for file_name in self.truth_files:
             key = file_name.split('.')[0]
             var = IntVar(value=0)
@@ -134,6 +145,11 @@ class MyApp:
             cb = Checkbutton(self.right_frame, text=key, variable=var, command=self.on_checkbox_toggle, bg=self.bg1)
             cb.grid(row=base_inx, column=0, sticky="w")
             base_inx += 1
+        self.my_textbox = Text(self.right_frame, width=30, height=2)
+        self.my_textbox.insert("end", "Hold Ctrl to zoom\n")
+        self.my_textbox.config(state="disabled")  # Make read-only
+        self.my_textbox.grid(row=base_inx, column=0, sticky="ew", padx=5, pady=5)
+        base_inx += 1
 
         # Add the "Switch View" button below the checkboxes.
         self.switch_view_button = Button(self.right_frame, text="Switch View", command=self.switch_view,
@@ -144,20 +160,28 @@ class MyApp:
                                   background=self.bg1, relief="groove")
         self.load_button.grid(row=base_inx+1, column=0, sticky="ew", ipadx=20)
 
+        # Add the "Switch View" button below the checkboxes.
+        self.switch_view_button = Button(self.right_frame, text="Switch View", command=self.switch_view,
+                                         background=self.bg1, relief="groove")
+        self.switch_view_button.grid(row=base_inx, column=0, sticky="ew", pady=10)
+
+        self.load_button = Button(self.right_frame, text="Write Prediction", command=self.write_prediction,
+                                  background=self.bg1, relief="groove")
+        self.load_button.grid(row=base_inx+1, column=0, sticky="ew", ipadx=20)
         self.load_image()
 
     def update_slider_range(self):
         """Update the slider range based on the current view mode."""
         if self.image_array is None:
             return
-        if self.view_mode == "axial":
-            num = self.image_array.shape[0]
-        elif self.view_mode == "coronal":
+        if self.view_mode == "coronal":
             num = self.image_array.shape[1]
         elif self.view_mode == "sagittal":
             num = self.image_array.shape[2]
+        else:
+            num = self.image_array.shape[0]
         self.slice_scrollbar.config(from_=0, to=num - 1)
-        self.current_slice = 0
+        self.current_slice = num // 2
 
     def switch_view(self):
         """Cycle through axial, coronal, and sagittal views."""
@@ -178,6 +202,7 @@ class MyApp:
             mask_array += mask_slice
         mask_array = (mask_array == len(self.checked_masks)).astype('int') if self.checked_masks else mask_array
         if np.max(mask_array) > 0:
+            mask_array = mask_array[::-1] # Have to flip it back
             np.save(os.path.join(self.base_path, "Write_CTV_Pelvis_AI.npy"), mask_array.astype('bool'))
             fid = open(os.path.join(self.base_path, 'Status_Write.txt'), 'w+')
             fid.close()
@@ -196,6 +221,10 @@ class MyApp:
         self.offset_y = mouse_y - real_mouse_y_after_zoom
         self.display_slice(self.current_slice)
 
+    def on_combobox_select(self, event):
+        """Triggered whenever a new item is selected in the combobox."""
+        self.display_slice(self.current_slice)
+
     def load_image(self):
         """Load a NIfTI image, ground truth mask, and additional masks."""
         image_file = "Image.nii" if use_sitk else "Image.npy"
@@ -206,6 +235,7 @@ class MyApp:
                 self.image_array = sitk.GetArrayFromImage(img)
             else:
                 self.image_array = np.load(image_path)
+            self.image_array = self.image_array[::-1]
             min_val, max_val = -200, 300
             dif = max_val - min_val if max_val != min_val else 1
             self.image_array = (self.image_array - min_val) / dif * 255
@@ -220,6 +250,7 @@ class MyApp:
                     mask_array = sitk.GetArrayFromImage(mask)
                 else:
                     mask_array = np.load(os.path.join(self.base_path, file_name))
+                mask_array = mask_array[::-1]
                 self.mask_arrays[key] = mask_array
 
             shapes = [arr.shape for arr in self.mask_arrays.values()] + [self.image_array.shape, self.image_array.shape]
@@ -246,10 +277,16 @@ class MyApp:
 
     def on_slice_scroll_wheel(self, event):
         """Handle scrolling through slices using the mouse wheel."""
+        if self.view_mode == "coronal":
+            max_val = self.image_array.shape[1]
+        elif self.view_mode == "sagittal":
+            max_val = self.image_array.shape[2]
+        else:
+            max_val = self.image_array.shape[0]
         if event.delta > 0:
             self.current_slice = max(0, self.current_slice - 1)
         else:
-            self.current_slice = min(self.current_slice + 1, self.image_array.shape[0] - 1)
+            self.current_slice = min(self.current_slice + 1, max_val - 1)
         self.slice_scrollbar.set(self.current_slice)
         self.display_slice(self.current_slice)
 
@@ -259,15 +296,12 @@ class MyApp:
     def display_slice(self, slice_index):
         try:
             # Extract the appropriate slice based on the view mode.
-            if self.view_mode == "axial":
-                img_slice = self.image_array[slice_index, :, :]
-                truth_slice = self.truth_array[slice_index, :, :]
-            elif self.view_mode == "coronal":
+            if self.view_mode == "coronal":
                 img_slice = self.image_array[:, slice_index, :]
-                truth_slice = self.truth_array[:, slice_index, :]
             elif self.view_mode == "sagittal":
                 img_slice = self.image_array[:, :, slice_index]
-                truth_slice = self.truth_array[:, :, slice_index]
+            else:
+                img_slice = self.image_array[slice_index, :, :]
 
             # Normalize the image slice safely to 0-255.
             min_val = np.min(img_slice)
@@ -283,14 +317,19 @@ class MyApp:
             blue = [0, 0, 255]
             pred_slice = np.zeros(img_slice.shape)
             for mask_name in self.checked_masks:
-                if self.view_mode == "axial":
-                    mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
-                elif self.view_mode == "coronal":
+                if self.view_mode == "coronal":
                     mask_slice = self.mask_arrays[mask_name][:, slice_index, :]
                 elif self.view_mode == "sagittal":
                     mask_slice = self.mask_arrays[mask_name][:, :, slice_index]
+                else:
+                    mask_slice = self.mask_arrays[mask_name][slice_index, :, :]
                 pred_slice += mask_slice
-            pred_slice = (pred_slice == len(self.checked_masks)).astype('int') if self.checked_masks else pred_slice
+            combobox_item = self.intersection_union_combobox.get()
+            if self.checked_masks:
+                if combobox_item == 'Intersection':
+                    pred_slice = (pred_slice == len(self.checked_masks)).astype('int')
+                else:
+                    pred_slice = (pred_slice > 0).astype('int')
 
             truth_slice = np.zeros(img_slice.shape)
             for truth_name in self.checked_truth:
@@ -338,6 +377,12 @@ class MyApp:
             print(f"Error displaying slice {slice_index}: {e}")
 
     def on_resize(self, event):
+        # If we have a stored size, compare it to the current size.
+        if (event.width, event.height) == self._last_size:
+            return
+        # Update stored size.
+        self._last_size = (event.width, event.height)
+
         if not self.is_loading_image and self.image_array is not None:
             self.display_slice(self.current_slice)
 
@@ -351,7 +396,6 @@ def run_model(path):
     fid = open(os.path.join(path, "Close.txt"), 'w+')
     fid.close()
 
-
 if __name__ == '__main__':
-    path = r'\\vscifs1\PhysicsQAdata\BMA\Predictions\ProstateNodes\Output\1.3.46.670589.33.1.63862355173814227200001.5286669292534571828'
+    path = r'\\vscifs1\PhysicsQAdata\BMA\Predictions\ProstateNodes\Output\1.3.12.2.1107.5.1.7.130063.30000023071909191039900000262'
     run_model(path)
